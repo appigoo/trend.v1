@@ -21,36 +21,35 @@ def fetch_data(ticker, interval):
     return data
 
 def analyze_trend(df):
+    # 確保返回 5 個值，即使在數據不足的情況下
     if len(df) < ema_slow:
-        return None, "數據不足"
+        return df, "計算中...", "等待數據", None, False
     
-    # 計算指標
+    # --- 以下是原本的計算邏輯 ---
     df['EMA_Fast'] = df['Close'].ewm(span=ema_fast, adjust=False).mean()
     df['EMA_Slow'] = df['Close'].ewm(span=ema_slow, adjust=False).mean()
-    df['Vol_MA'] = df['Volume'].rolling(window=10).mean() # 成交量均線
+    df['Vol_MA'] = df['Volume'].rolling(window=10).mean()
     
     last_row = df.iloc[-1]
     prev_row = df.iloc[-2]
     
-    # 趨勢判斷邏輯
-    current_price = last_row['Close']
+    # 趨勢與反轉邏輯
     is_bullish = last_row['EMA_Fast'] > last_row['EMA_Slow']
-    vol_spike = last_row['Volume'] > (last_row['Vol_MA'] * 1.5) # 成交量異常放大
+    vol_spike = float(last_row['Volume']) > (float(last_row['Vol_MA']) * 1.5)
     
-    # 檢測反轉點
     signal = "穩定"
     alert = None
     
-    # 金叉：反轉看漲
+    # 偵測交叉
     if prev_row['EMA_Fast'] <= prev_row['EMA_Slow'] and last_row['EMA_Fast'] > last_row['EMA_Slow']:
         signal = "反轉向上"
         alert = "⚠️ 趨勢反轉：偵測到黃金交叉 (看漲)"
-    # 死叉：反轉看跌
     elif prev_row['EMA_Fast'] >= prev_row['EMA_Slow'] and last_row['EMA_Fast'] < last_row['EMA_Slow']:
         signal = "反轉向下"
         alert = "⚠️ 趨勢反轉：偵測到死亡交叉 (看跌)"
     
     trend = "看漲 (Uptrend)" if is_bullish else "看跌 (Downtrend)"
+    
     return df, trend, signal, alert, vol_spike
 
 # --- 主體循環 ---
