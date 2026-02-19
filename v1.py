@@ -16,40 +16,49 @@ ema_fast = st.sidebar.slider("快速 EMA 週期", 5, 20, 9)
 ema_slow = st.sidebar.slider("慢速 EMA 週期", 21, 50, 21)
 
 def fetch_data(ticker, interval):
-    # 獲取最近 1 天的細分數據
     data = yf.download(ticker, period="1d", interval=interval, progress=False)
+    # 如果是多級索引（yfinance 新版常見），只保留第一層指標名稱（Open, Close...）
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
     return data
 
 def analyze_trend(df):
-    # 確保返回 5 個值，即使在數據不足的情況下
     if len(df) < ema_slow:
         return df, "計算中...", "等待數據", None, False
     
-    # --- 以下是原本的計算邏輯 ---
+    # 計算指標
     df['EMA_Fast'] = df['Close'].ewm(span=ema_fast, adjust=False).mean()
     df['EMA_Slow'] = df['Close'].ewm(span=ema_slow, adjust=False).mean()
     df['Vol_MA'] = df['Volume'].rolling(window=10).mean()
     
+    # 獲取最後兩列，並確保它們是數值
     last_row = df.iloc[-1]
     prev_row = df.iloc[-2]
     
-    # 趨勢與反轉邏輯
-    is_bullish = last_row['EMA_Fast'] > last_row['EMA_Slow']
-    vol_spike = float(last_row['Volume']) > (float(last_row['Vol_MA']) * 1.5)
+    # 使用 float() 確保比較的是數值而非 Series
+    curr_fast = float(last_row['EMA_Fast'])
+    curr_slow = float(last_row['EMA_Slow'])
+    prev_fast = float(prev_row['EMA_Fast'])
+    prev_slow = float(prev_row['EMA_Slow'])
+    curr_vol = float(last_row['Volume'])
+    avg_vol = float(last_row['Vol_MA'])
+    
+    # 趨勢判斷
+    is_bullish = curr_fast > curr_slow
+    vol_spike = curr_vol > (avg_vol * 1.5)
     
     signal = "穩定"
     alert = None
     
-    # 偵測交叉
-    if prev_row['EMA_Fast'] <= prev_row['EMA_Slow'] and last_row['EMA_Fast'] > last_row['EMA_Slow']:
+    # 偵測交叉 (現在比較的是 float，不會再有模糊問題)
+    if prev_fast <= prev_slow and curr_fast > curr_slow:
         signal = "反轉向上"
         alert = "⚠️ 趨勢反轉：偵測到黃金交叉 (看漲)"
-    elif prev_row['EMA_Fast'] >= prev_row['EMA_Slow'] and last_row['EMA_Fast'] < last_row['EMA_Slow']:
+    elif prev_fast >= prev_slow and curr_fast < curr_slow:
         signal = "反轉向下"
         alert = "⚠️ 趨勢反轉：偵測到死亡交叉 (看跌)"
     
     trend = "看漲 (Uptrend)" if is_bullish else "看跌 (Downtrend)"
-    
     return df, trend, signal, alert, vol_spike
 
 # --- 主體循環 ---
