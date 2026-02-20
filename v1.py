@@ -115,7 +115,10 @@ while True:
             fig.add_trace(go.Scatter(x=main_df.index, y=main_df['EMA_F'], name="快速EMA", line=dict(color='orange')))
             
             fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=30, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            
+            # --- 關鍵修改處：加入唯一的 key ---
+            # 使用時間戳確保每次刷新時 ID 都是唯一的
+            st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{int(time.time())}")
 
         # --- Bottom Section: 數據明細 ---
         with st.expander("查看 1m 原始數據明細"):
