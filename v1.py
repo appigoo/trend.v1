@@ -6,14 +6,40 @@ from datetime import datetime
 import time
 
 # --- 頁面配置 ---
-st.set_page_config(page_title="多時段趨勢與異動監控", layout="wide")
-st.title("📊 多時段實時趨勢與異動分析")
+st.set_page_config(page_title="量價異動強力監控", layout="wide")
+
+# --- 注入 CSS 閃爍動畫 ---
+st.markdown("""
+    <style>
+    @keyframes blinker {  
+        50% { opacity: 0.3; background-color: #FF4B4B; }
+    }
+    .flash-box {
+        padding: 20px;
+        border-radius: 10px;
+        border: 2px solid #FF4B4B;
+        background-color: rgba(255, 75, 75, 0.1);
+        animation: blinker 1s linear infinite;
+        text-align: center;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🚀 量價齊動 - 強力視覺監控儀表板")
 
 # --- 側邊欄參數 ---
-symbol = st.sidebar.text_input("輸入股票代碼", "AAPL").upper()
-intervals = ["1m", "5m", "15m", "30m"]
-ema_fast_p = st.sidebar.slider("快速 EMA 週期", 5, 20, 9)
-ema_slow_p = st.sidebar.slider("慢速 EMA 週期", 21, 50, 21)
+with st.sidebar:
+    symbol = st.text_input("輸入股票代碼", "AAPL").upper()
+    st.divider()
+    intervals = ["1m", "5m", "15m", "30m"]
+    ema_fast_p = st.slider("快速 EMA 週期", 5, 20, 9)
+    ema_slow_p = st.slider("慢速 EMA 週期", 21, 50, 21)
+    st.divider()
+    # 新增：異動倍數參數
+    alert_threshold = st.slider("⚠️ 異動警告倍數 (vs 平均值)", 1.5, 5.0, 3.0, 0.5)
 
 def fetch_multi_data(ticker):
     results = {}
@@ -26,44 +52,32 @@ def fetch_multi_data(ticker):
     return results
 
 def full_analysis(df):
-    """整合趨勢預測與異動計算"""
-    if len(df) < ema_slow_p + 2:
-        return None
+    if len(df) < 15: return None
     
-    # --- 1. 計算技術指標 ---
+    # 計算指標
     df['EMA_F'] = df['Close'].ewm(span=ema_fast_p, adjust=False).mean()
     df['EMA_S'] = df['Close'].ewm(span=ema_slow_p, adjust=False).mean()
     df['Price_Chg'] = df['Close'].pct_change() * 100
     df['Vol_Chg'] = df['Volume'].pct_change() * 100
     
-    # --- 2. 趨勢與信號判斷 ---
-    curr_f, prev_f = float(df['EMA_F'].iloc[-1]), float(df['EMA_F'].iloc[-2])
-    curr_s, prev_s = float(df['EMA_S'].iloc[-1]), float(df['EMA_S'].iloc[-2])
+    # 當前數據
+    curr_p_chg = abs(df['Price_Chg'].iloc[-1]) # 取絕對值判斷波動
+    curr_v_chg = df['Vol_Chg'].iloc[-1]
     
-    trend = "看漲 (Uptrend)" if curr_f > curr_s else "看跌 (Downtrend)"
-    signal = "穩定"
-    alert = None
-    
-    if prev_f <= prev_s and curr_f > curr_s:
-        signal = "🚀 黃金交叉"
-        alert = "趨勢反轉向上"
-    elif prev_f >= prev_s and curr_f < curr_s:
-        signal = "💀 死亡交叉"
-        alert = "趨勢反轉向下"
-
-    # --- 3. 異動基準計算 (前10名平均) ---
+    # 前10名平均值 (基準)
     avg_10_p = df['Price_Chg'].iloc[-11:-1].abs().mean()
     avg_10_v = df['Vol_Chg'].iloc[-11:-1].abs().mean()
     
+    # 判定是否觸發強力警報
+    is_extreme = (curr_p_chg > avg_10_p * alert_threshold) and (curr_v_chg > avg_10_v * alert_threshold)
+    
     return {
-        "trend": trend,
-        "signal": signal,
-        "alert": alert,
+        "trend": "看漲" if df['EMA_F'].iloc[-1] > df['EMA_S'].iloc[-1] else "看跌",
         "curr_p_chg": df['Price_Chg'].iloc[-1],
-        "curr_v_chg": df['Vol_Chg'].iloc[-1],
-        "avg_p_chg": avg_10_p,
-        "avg_v_p": avg_10_v,
-        "last_p": float(df['Close'].iloc[-1])
+        "curr_v_chg": curr_v_chg,
+        "avg_p": avg_10_p,
+        "avg_v": avg_10_v,
+        "is_extreme": is_extreme
     }
 
 # --- 主體循環 ---
@@ -72,45 +86,34 @@ placeholder = st.empty()
 while True:
     with placeholder.container():
         all_data = fetch_multi_data(symbol)
-        
-        # --- 第一部分：多時段 Dashboard (含趨勢預測) ---
-        st.subheader(f"🔍 {symbol} 多時段狀態監控")
         cols = st.columns(len(intervals))
         
         for i, inter in enumerate(intervals):
             res = full_analysis(all_data[inter])
             with cols[i]:
                 if res:
-                    st.markdown(f"### {inter}")
-                    # 顯示趨勢與信號
-                    st.info(f"**趨勢:** {res['trend']}")
-                    if "交叉" in res['signal']:
-                        st.warning(f"**信號:** {res['signal']}")
-                    else:
-                        st.write(f"狀態: {res['signal']}")
+                    # 如果觸發極端異動，顯示閃爍盒子
+                    if res['is_extreme']:
+                        st.markdown(f'<div class="flash-box">⚡ {inter} 極端異動告警 ⚡</div>', unsafe_allow_html=True)
                     
-                    # 顯示異動對比
-                    st.metric("當前升跌", f"{res['curr_p_chg']:.2f}%", 
-                              delta=f"vs 平均 {res['avg_p_chg']:.2f}%")
-                    st.metric("成交量異動", f"{res['curr_v_chg']:.1f}%", 
-                              delta=f"vs 平均 {res['avg_v_p']:.1f}%", delta_color="inverse")
+                    st.subheader(f"⏱️ {inter}")
+                    st.write(f"趨勢: {res['trend']}")
+                    
+                    st.metric("當前升跌幅", f"{res['curr_p_chg']:.2f}%", 
+                              delta=f"基準 {res['avg_p']:.2f}%")
+                    st.metric("成交量變動", f"{res['curr_v_chg']:.1f}%", 
+                              delta=f"基準 {res['avg_v']:.1f}%", delta_color="inverse")
                 else:
-                    st.write(f"{inter} 數據不足")
+                    st.write(f"{inter} 數據準備中")
 
-        # --- 第二部分：核心圖表 (5m) ---
+        # 圖表顯示 (5m 為例)
+        st.divider()
         main_df = all_data["5m"]
         if not main_df.empty:
-            st.divider()
-            st.subheader(f"📈 核心走勢圖 (5m) - {symbol}")
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(x=main_df.index, open=main_df['Open'], high=main_df['High'], 
-                                         low=main_df['Low'], close=main_df['Close'], name="K線"))
-            fig.add_trace(go.Scatter(x=main_df.index, y=main_df['EMA_F'], name="快速EMA", line=dict(color='orange')))
-            fig.add_trace(go.Scatter(x=main_df.index, y=main_df['EMA_S'], name="慢速EMA", line=dict(color='blue')))
-            
-            fig.update_layout(xaxis_rangeslider_visible=False, height=500, margin=dict(t=30, b=10))
-            # 解決重複 ID 問題：加入動態 key
-            st.plotly_chart(fig, use_container_width=True, key=f"main_chart_{int(time.time())}")
+            fig = go.Figure(data=[go.Candlestick(x=main_df.index, open=main_df['Open'], 
+                            high=main_df['High'], low=main_df['Low'], close=main_df['Close'], name="K線")])
+            fig.update_layout(height=400, xaxis_rangeslider_visible=False, template="plotly_dark")
+            st.plotly_chart(fig, use_container_width=True, key=f"chart_{int(time.time())}")
 
-        st.caption(f"最後同步時間: {datetime.now().strftime('%H:%M:%S')}")
+        st.caption(f"最後更新: {datetime.now().strftime('%H:%M:%S')} (設定閾值: {alert_threshold}倍)")
         time.sleep(60)
